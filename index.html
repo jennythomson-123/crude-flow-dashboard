@@ -140,13 +140,18 @@ select { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 0.5px so
 </div>
 <script>
 const REGION_COLORS = {
-  "Africa":"#D85A30","Eurasia":"#534AB7","Middle East":"#BA7517",
-  "NON-OECD Americas":"#1D9E75","OECD Americas":"#378ADD",
-  "OECD Asia Oceania":"#D4537E","OECD Europe":"#888780",
-  "Other Asia":"#639922","Unknown Origin":"#B4B2A9","Unknown":"#B4B2A9"
+  "Africa":"#02889E",
+  "Eurasia":"#644875",
+  "Middle East":"#FFBD02",
+  "NON-OECD Americas":"#01A93E",
+  "OECD Americas":"#81CFE1",
+  "OECD Asia Oceania":"#EA7B1A",
+  "OECD Europe":"#D14648",
+  "Other Asia":"#B59FCA",
+  "Unknown Origin":"#7F7F7F",
+  "Unknown":"#BFBFBF"
 };
-const PALETTE=["#D85A30","#534AB7","#BA7517","#1D9E75","#378ADD","#D4537E","#888780","#639922","#B4B2A9","#0F6E56","#993556","#3C3489"];
-const _xc={};
+const PALETTE=["#02889E","#644875","#FFBD02","#01A93E","#81CFE1","#EA7B1A","#D14648","#B59FCA","#7F7F7F","#BFBFBF","#02889E","#644875"];const _xc={};
 function rColor(r){ if(REGION_COLORS[r]) return REGION_COLORS[r]; if(!_xc[r]) _xc[r]=PALETTE[Object.keys(_xc).length%PALETTE.length]; return _xc[r]; }
 const fmtKbd=v=>(v>0?'+':'')+Math.round(v).toLocaleString()+' kb/d';
 const S={
