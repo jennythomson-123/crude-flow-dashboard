@@ -48,7 +48,6 @@ select { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 0.5px so
 </style>
 </head>
 <body>
-
 <div class="topbar">
   <h1>Crude export flow dashboard <span class="period-label" id="period-lbl"></span></h1>
   <label class="upload-btn">
@@ -56,15 +55,13 @@ select { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 0.5px so
     Upload Excel
     <input type="file" accept=".xlsx,.xls,.csv" id="file-input">
   </label>
-  <span class="status" id="status-msg">Sample data loaded — Feb vs Mar 2026</span>
+  <span class="status" id="status-msg">Loading data…</span>
 </div>
-
 <div class="tabs-bar">
   <button class="tab active" onclick="switchTab('bubble',this)">Bubble scatter — volume by corridor</button>
   <button class="tab" onclick="switchTab('diverging',this)">Diverging bars — m-o-m change</button>
   <button class="tab" onclick="switchTab('waterfall',this)">Waterfall — by import region</button>
 </div>
-
 <div class="panel active" id="panel-bubble">
   <div class="col-info" id="b-col-info"></div>
   <div class="row" id="b-stats"></div>
@@ -90,7 +87,6 @@ select { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 0.5px so
   </div>
   <p class="note" id="b-note"></p>
 </div>
-
 <div class="panel" id="panel-diverging">
   <div class="col-info" id="d-col-info"></div>
   <div class="gran-toggle" style="margin-bottom:12px;">
@@ -116,7 +112,6 @@ select { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 0.5px so
   </div>
   <p class="note" id="d-note"></p>
 </div>
-
 <div class="panel" id="panel-waterfall">
   <div class="col-info" id="w-col-info"></div>
   <div class="controls" style="align-items:flex-start;flex-direction:column;gap:6px;">
@@ -143,7 +138,6 @@ select { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 0.5px so
   </div>
   <p class="note" id="w-note"></p>
 </div>
-
 <script>
 const REGION_COLORS = {
   "Africa":"#D85A30","Eurasia":"#534AB7","Middle East":"#BA7517",
@@ -155,7 +149,6 @@ const PALETTE=["#D85A30","#534AB7","#BA7517","#1D9E75","#378ADD","#D4537E","#888
 const _xc={};
 function rColor(r){ if(REGION_COLORS[r]) return REGION_COLORS[r]; if(!_xc[r]) _xc[r]=PALETTE[Object.keys(_xc).length%PALETTE.length]; return _xc[r]; }
 const fmtKbd=v=>(v>0?'+':'')+Math.round(v).toLocaleString()+' kb/d';
-
 const S={
   month1:'Feb 2026', month2:'Mar 2026',
   rows:[], aggRegion:[], aggCountry:[],
@@ -164,9 +157,6 @@ const S={
   bubbleGran:'region', divGran:'region', divView:'mom', wfView:'vs2025'
 };
 let bChart=null, dChart=null, wChart=null;
-
-/* col positions (0-indexed): 0=EX_REGION 1=EX_COUNTRY 2=IM_REGION 3=IM_COUNTRY
-   4=vol1(col5) 5=vol2(col6) 6=mom(col7) 7=avg2025(col8) 8=vsAvg(col9,last) */
 const COL={exRegion:0,exCountry:1,imRegion:2,imCountry:3,vol1:4,vol2:5,mom:6,avg2025:7,vsAvg:8};
 
 function parseDateLabel(raw){
@@ -180,46 +170,49 @@ function parseDateLabel(raw){
   return s;
 }
 
+function processRawData(buf, filename){
+  const wb=XLSX.read(buf,{type:'array'});
+  const ws=wb.Sheets[wb.SheetNames[0]];
+  const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+  let hi=-1;
+  for(let i=0;i<Math.min(15,raw.length);i++){ if(raw[i].some(c=>String(c||'').trim().toUpperCase()==='EX_REGION')){hi=i;break;} }
+  if(hi<0){ setStatus('Header row not found — need EX_REGION column.','err'); return; }
+  const headers=raw[hi].map(c=>String(c||'').trim());
+  if(headers.length<9){ setStatus(`Only ${headers.length} columns found — expected 9.`,'err'); return; }
+  const m1=parseDateLabel(headers[COL.vol1]);
+  const m2=parseDateLabel(headers[COL.vol2]);
+  const vsLbl=headers[COL.vsAvg]||'vs 2025';
+  const avgLbl=headers[COL.avg2025]||'2025 Average';
+  const parsed=[];
+  for(let i=hi+1;i<raw.length;i++){
+    const r=raw[i];
+    const exR=String(r[COL.exRegion]||'').trim();
+    const imR=String(r[COL.imRegion]||'').trim();
+    if(!exR||exR.toUpperCase()==='EX_REGION'||!imR) continue;
+    parsed.push({
+      exRegion:exR, exCountry:String(r[COL.exCountry]||'').trim()||exR,
+      imRegion:imR, imCountry:String(r[COL.imCountry]||'').trim()||imR,
+      vol1:parseFloat(r[COL.vol1])||0, vol2:parseFloat(r[COL.vol2])||0,
+      mom:parseFloat(r[COL.mom])||0,
+      avg2025:parseFloat(r[COL.avg2025])||0, vsAvg:parseFloat(r[COL.vsAvg])||0
+    });
+  }
+  if(parsed.length===0){ setStatus('No data rows found.','err'); return; }
+  const info=`<strong>Columns detected:</strong> <span class="col-pill">col5=${m1}</span><span class="col-pill">col6=${m2}</span><span class="col-pill">col7=m-o-m</span><span class="col-pill">col8=${avgLbl}</span><span class="col-pill">col9=${vsLbl}</span> &nbsp;${parsed.length} rows`;
+  ['b-col-info','d-col-info','w-col-info'].forEach(id=>{document.getElementById(id).innerHTML=info;document.getElementById(id).style.display='block';});
+  S.month1=m1||'Prior month'; S.month2=m2||'Current month';
+  document.getElementById('period-lbl').textContent=`— ${S.month1} vs ${S.month2}`;
+  setStatus(`Loaded: ${filename} — ${parsed.length} rows`,'ok');
+  destroyAll(); initData(parsed);
+}
+
 document.getElementById('file-input').addEventListener('change',function(e){
   const file=e.target.files&&e.target.files[0]; if(!file) return;
   setStatus('Reading…','');
   const reader=new FileReader();
   reader.onload=function(ev){
-    try{
-      const wb=XLSX.read(ev.target.result,{type:'array'});
-      const ws=wb.Sheets[wb.SheetNames[0]];
-      const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-      let hi=-1;
-      for(let i=0;i<Math.min(15,raw.length);i++){ if(raw[i].some(c=>String(c||'').trim().toUpperCase()==='EX_REGION')){hi=i;break;} }
-      if(hi<0){setStatus('Header row not found — need EX_REGION column.','err');return;}
-      const headers=raw[hi].map(c=>String(c||'').trim());
-      if(headers.length<9){setStatus(`Only ${headers.length} columns found — expected 9.`,'err');return;}
-      const m1=parseDateLabel(headers[COL.vol1]);
-      const m2=parseDateLabel(headers[COL.vol2]);
-      const vsLbl=headers[COL.vsAvg]||'vs 2025';
-      const avgLbl=headers[COL.avg2025]||'2025 Average';
-      const parsed=[];
-      for(let i=hi+1;i<raw.length;i++){
-        const r=raw[i];
-        const exR=String(r[COL.exRegion]||'').trim();
-        const imR=String(r[COL.imRegion]||'').trim();
-        if(!exR||exR.toUpperCase()==='EX_REGION'||!imR) continue;
-        parsed.push({
-          exRegion:exR, exCountry:String(r[COL.exCountry]||'').trim()||exR,
-          imRegion:imR, imCountry:String(r[COL.imCountry]||'').trim()||imR,
-          vol1:parseFloat(r[COL.vol1])||0, vol2:parseFloat(r[COL.vol2])||0,
-          mom:parseFloat(r[COL.mom])||0,
-          avg2025:parseFloat(r[COL.avg2025])||0, vsAvg:parseFloat(r[COL.vsAvg])||0
-        });
-      }
-      if(parsed.length===0){setStatus('No data rows found.','err');return;}
-      const info=`<strong>Columns detected:</strong> <span class="col-pill">col5=${m1}</span><span class="col-pill">col6=${m2}</span><span class="col-pill">col7=m-o-m</span><span class="col-pill">col8=${avgLbl}</span><span class="col-pill">col9=${vsLbl}</span> &nbsp;${parsed.length} rows`;
-      ['b-col-info','d-col-info','w-col-info'].forEach(id=>{document.getElementById(id).innerHTML=info;document.getElementById(id).style.display='block';});
-      S.month1=m1||'Prior month'; S.month2=m2||'Current month';
-      document.getElementById('period-lbl').textContent=`— ${S.month1} vs ${S.month2}`;
-      setStatus(`Loaded: ${file.name} — ${parsed.length} rows`,'ok');
-      destroyAll(); initData(parsed);
-    }catch(err){setStatus('Error: '+err.message,'err');console.error(err);}
+    try{ processRawData(ev.target.result, file.name); }
+    catch(err){ setStatus('Error: '+err.message,'err'); console.error(err); }
   };
   reader.readAsArrayBuffer(file);
 });
@@ -285,7 +278,6 @@ function updateBubble(){
   if(imF!=='all'){ if(isCtry){const ok=new Set(S.rows.filter(d=>d.imRegion===imF).map(d=>d.imCountry));data=data.filter(d=>ok.has(d.im));}else data=data.filter(d=>d.im===imF); }
   const tv1=data.reduce((s,d)=>s+d.vol1,0), tv2=data.reduce((s,d)=>s+d.vol2,0);
   const totMom=data.reduce((s,d)=>s+d.mom,0), totAvg=data.reduce((s,d)=>s+d.avg2025,0), totVsAvg=data.reduce((s,d)=>s+d.vsAvg,0);
-  const pct=tv1>0?((tv2-tv1)/tv1*100).toFixed(1):'n/a';
   const shrink=data.filter(d=>d.mom<0).length;
   document.getElementById('b-stats').innerHTML=`
     <div class="stat-card"><div class="lbl">${S.month1} total (col 5)</div><div class="val">${Math.round(tv1).toLocaleString()} kb/d</div></div>
@@ -373,222 +365,90 @@ function setWaterfallView(v){
   S.wfView=v;
   document.getElementById('w-view-vs2025').classList.toggle('active',v==='vs2025');
   document.getElementById('w-view-mom').classList.toggle('active',v==='mom');
-  const baseLbl = document.getElementById('w-base-label');
-  const finalLbl = document.getElementById('w-final-label');
-  if(baseLbl) baseLbl.textContent = v==='mom' ? S.month1 : '2025 avg';
-  if(finalLbl) finalLbl.textContent = S.month2 + ' total';
+  const baseLbl=document.getElementById('w-base-label');
+  const finalLbl=document.getElementById('w-final-label');
+  if(baseLbl) baseLbl.textContent=v==='mom'?S.month1:'2025 avg';
+  if(finalLbl) finalLbl.textContent=S.month2+' total';
   if(wChart){wChart.destroy();wChart=null;}renderWaterfall();
 }
 function renderWaterfall(){
   updateWfTabStyles();
   const imR=S.activeImKey, isMom=S.wfView==='mom';
   const imRows=S.rows.filter(d=>d.imRegion===imR);
-
-  /* ── BASE AND FINAL ──
-     m-o-m view:   base = sum col5 (vol1 = prior month),  final = sum col6 (vol2 = current month)
-     vs2025 view:  base = sum col8 (avg2025 = 2025 avg),  final = sum col6 (vol2 = current month) */
-  const base  = isMom
-    ? imRows.reduce((s,d)=>s+d.vol1,0)
-    : imRows.reduce((s,d)=>s+d.avg2025,0);
-  const final = imRows.reduce((s,d)=>s+d.vol2,0);
-  const baseLabel = isMom ? S.month1 : '2025 avg';
-
-  /* ── STEPS ──
-     m-o-m view:   sum col7 (mom)   per EX_REGION, filtered to this IM_REGION
-     vs2025 view:  sum col9 (vsAvg) per EX_REGION, filtered to this IM_REGION */
+  const base=isMom?imRows.reduce((s,d)=>s+d.vol1,0):imRows.reduce((s,d)=>s+d.avg2025,0);
+  const final=imRows.reduce((s,d)=>s+d.vol2,0);
+  const baseLabel=isMom?S.month1:'2025 avg';
   const stepMap={};
   imRows.forEach(d=>{
     if(!stepMap[d.exRegion]) stepMap[d.exRegion]=0;
-    stepMap[d.exRegion] += isMom ? d.mom : d.vsAvg;
+    stepMap[d.exRegion]+=isMom?d.mom:d.vsAvg;
   });
-  const steps=Object.entries(stepMap)
-    .map(([ex,val])=>({ex, val:Math.round(val)}))
-    .sort((a,b)=>a.val-b.val);
-
-  const totalChange = final - base;
-  const nPos=steps.filter(s=>s.val>0).length;
-  const nNeg=steps.filter(s=>s.val<0).length;
-
+  const steps=Object.entries(stepMap).map(([ex,val])=>({ex,val:Math.round(val)})).sort((a,b)=>a.val-b.val);
+  const totalChange=final-base;
+  const nPos=steps.filter(s=>s.val>0).length, nNeg=steps.filter(s=>s.val<0).length;
   document.getElementById('w-stats').innerHTML=`
     <div class="stat-card"><div class="lbl">${baseLabel} — ${imR}</div><div class="val">${Math.round(base).toLocaleString()} kb/d</div></div>
     <div class="stat-card"><div class="lbl">${S.month2} total — ${imR}</div><div class="val">${Math.round(final).toLocaleString()} kb/d</div></div>
     <div class="stat-card"><div class="lbl">Total change</div><div class="val" style="color:${totalChange<0?'#E24B4A':'#1D9E75'}">${fmtKbd(totalChange)}</div></div>
     <div class="stat-card"><div class="lbl">EX regions adding</div><div class="val" style="color:#1D9E75">${nPos}</div></div>
     <div class="stat-card"><div class="lbl">EX regions subtracting</div><div class="val" style="color:#E24B4A">${nNeg}</div></div>`;
-
-  document.getElementById('w-view-desc').textContent = isMom
-    ? `Base = ${S.month1} (col 5). Steps = col 7 (m-o-m) per EX_REGION into ${imR}`
-    : `Base = 2025 avg (col 8). Steps = col 9 (vs 2025) per EX_REGION into ${imR}`;
-  document.getElementById('w-note').textContent = isMom
-    ? `Base bar = ${S.month1} total imports into ${imR}. Each step = that EX_REGION's m-o-m contribution (col 7). Final bar = ${S.month2} total.`
-    : `Base bar = 2025 monthly average imports into ${imR}. Each step = that EX_REGION's deviation from 2025 avg (col 9). Final bar = ${S.month2} total.`;
-
-  /* ── WATERFALL STACK ──
-     Transparent float lifts each step to the correct vertical position.
-     Base and Final are standalone solid bars (float = 0). */
+  document.getElementById('w-view-desc').textContent=isMom?`Base=${S.month1} (col5). Steps=col7 per EX_REGION into ${imR}`:`Base=2025 avg (col8). Steps=col9 per EX_REGION into ${imR}`;
+  document.getElementById('w-note').textContent=isMom?`Base=${S.month1} total. Steps=each EX_REGION m-o-m (col7). Final=${S.month2} total.`:`Base=2025 avg. Steps=each EX_REGION vs 2025 avg (col9). Final=${S.month2} total.`;
   const labels=[],floats=[],greens=[],reds=[],grays=[];
-
-  /* BASE */
-  labels.push(baseLabel);
-  floats.push(0); grays.push(Math.round(base)); greens.push(0); reds.push(0);
-
-  /* STEPS */
+  labels.push(baseLabel); floats.push(0); grays.push(Math.round(base)); greens.push(0); reds.push(0);
   let running=Math.round(base);
   steps.forEach(s=>{
-    labels.push(s.ex);
-    floats.push(s.val>=0 ? running : running+s.val);
-    grays.push(0);
-    if(s.val>=0){ greens.push(s.val); reds.push(0); }
-    else        { greens.push(0);     reds.push(Math.abs(s.val)); }
+    labels.push(s.ex); floats.push(s.val>=0?running:running+s.val); grays.push(0);
+    if(s.val>=0){greens.push(s.val);reds.push(0);}else{greens.push(0);reds.push(Math.abs(s.val));}
     running+=s.val;
   });
-
-  /* FINAL */
-  labels.push(S.month2);
-  floats.push(0); grays.push(Math.round(final)); greens.push(0); reds.push(0);
-
-  /* y axis — cover all step tops and bottoms */
-  const allY=[Math.round(base), Math.round(final)];
-  let r2=Math.round(base);
-  steps.forEach(s=>{ allY.push(r2); r2+=s.val; allY.push(r2); });
+  labels.push(S.month2); floats.push(0); grays.push(Math.round(final)); greens.push(0); reds.push(0);
+  const allY=[Math.round(base),Math.round(final)];
+  let r2=Math.round(base); steps.forEach(s=>{allY.push(r2);r2+=s.val;allY.push(r2);});
   const yMin=Math.min(...allY)*0.93, yMax=Math.max(...allY)*1.06;
-
   const datasets=[
-    {label:'_float', data:floats, backgroundColor:'rgba(0,0,0,0)', borderColor:'rgba(0,0,0,0)', stack:'wf'},
-    {label:'Base/Final', data:grays,
-      backgroundColor:grays.map((_,i)=>i===grays.length-1?'#378ADD':'#444441'),
-      stack:'wf', borderRadius:3},
-    {label:'Growth',  data:greens, backgroundColor:'rgba(29,158,117,0.82)',  stack:'wf', borderRadius:3},
-    {label:'Decline', data:reds,   backgroundColor:'rgba(226,75,74,0.82)',   stack:'wf', borderRadius:3},
+    {label:'_float',data:floats,backgroundColor:'rgba(0,0,0,0)',borderColor:'rgba(0,0,0,0)',stack:'wf'},
+    {label:'Base/Final',data:grays,backgroundColor:grays.map((_,i)=>i===grays.length-1?'#378ADD':'#444441'),stack:'wf',borderRadius:3},
+    {label:'Growth', data:greens,backgroundColor:'rgba(29,158,117,0.82)',stack:'wf',borderRadius:3},
+    {label:'Decline',data:reds,  backgroundColor:'rgba(226,75,74,0.82)', stack:'wf',borderRadius:3},
   ];
-
   const h=Math.max(400,(steps.length+2)*58+80);
   document.getElementById('w-chart-wrap').style.height=h+'px';
   const ctx=document.getElementById('wfChart').getContext('2d');
-
-  if(wChart){
-    wChart.data.labels=labels; wChart.data.datasets=datasets;
-    wChart.options.scales.y.min=yMin; wChart.options.scales.y.max=yMax;
-    wChart.update(); return;
-  }
-  wChart=new Chart(ctx,{
-    type:'bar', data:{labels,datasets},
-    options:{
-      responsive:true, maintainAspectRatio:false, layout:{padding:{top:32}},
-      plugins:{
-        legend:{display:false},
-        tooltip:{callbacks:{
-          label(item){
-            if(item.dataset.label==='_float') return null;
-            if(item.dataset.label==='Base/Final') return ' total: '+Math.round(item.raw).toLocaleString()+' kb/d';
-            const raw=item.dataset.label==='Decline'?-item.raw:item.raw;
-            return ' '+(raw>0?'+':'')+Math.round(raw).toLocaleString()+' kb/d';
-          },
-          filter(item){ return item.dataset.label!=='_float'&&item.raw!==0; }
-        }}
-      },
-      scales:{
-        x:{stacked:true, grid:{display:false}, ticks:{color:'#555',font:{size:11}}, border:{display:false}},
-        y:{stacked:true, min:yMin, max:yMax,
-          grid:{color:'rgba(136,135,128,0.12)'},
-          ticks:{color:'#888',font:{size:10},callback:v=>Math.round(v).toLocaleString()},
-          border:{display:false}}
-      }
-    },
-    plugins:[{
-      id:'wf-lbl',
-      afterDatasetsDraw(chart){
-        const{ctx:c,scales:{x,y},data}=chart;
-        c.save(); c.font='500 11px sans-serif'; c.textBaseline='bottom'; c.textAlign='center';
-        const gD=data.datasets[2].data, rD=data.datasets[3].data;
-        const fD=data.datasets[0].data, grD=data.datasets[1].data;
-        data.labels.forEach((lbl,i)=>{
-          const xp=x.getPixelForValue(i);
-          if(grD[i]>0){
-            c.fillStyle='#333';
-            c.fillText(Math.round(grD[i]).toLocaleString(), xp, y.getPixelForValue(grD[i])-4);
-            return;
-          }
-          if(gD[i]>0){ c.fillStyle='#0F6E56'; c.fillText('+'+Math.round(gD[i]).toLocaleString(), xp, y.getPixelForValue(fD[i]+gD[i])-4); }
-          if(rD[i]>0){ c.fillStyle='#A32D2D'; c.fillText('-'+Math.round(rD[i]).toLocaleString(), xp, y.getPixelForValue(fD[i])-4); }
-        });
-        c.restore();
-      }
-    }]
-  });
+  if(wChart){wChart.data.labels=labels;wChart.data.datasets=datasets;wChart.options.scales.y.min=yMin;wChart.options.scales.y.max=yMax;wChart.update();return;}
+  wChart=new Chart(ctx,{type:'bar',data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:32}},plugins:{legend:{display:false},tooltip:{callbacks:{label(item){if(item.dataset.label==='_float')return null;if(item.dataset.label==='Base/Final')return ' total: '+Math.round(item.raw).toLocaleString()+' kb/d';const raw=item.dataset.label==='Decline'?-item.raw:item.raw;return ' '+(raw>0?'+':'')+Math.round(raw).toLocaleString()+' kb/d';},filter(item){return item.dataset.label!=='_float'&&item.raw!==0;}}}},scales:{x:{stacked:true,grid:{display:false},ticks:{color:'#555',font:{size:11}},border:{display:false}},y:{stacked:true,min:yMin,max:yMax,grid:{color:'rgba(136,135,128,0.12)'},ticks:{color:'#888',font:{size:10},callback:v=>Math.round(v).toLocaleString()},border:{display:false}}}},plugins:[{id:'wf-lbl',afterDatasetsDraw(chart){const{ctx:c,scales:{x,y},data}=chart;c.save();c.font='500 11px sans-serif';c.textBaseline='bottom';c.textAlign='center';const gD=data.datasets[2].data,rD=data.datasets[3].data,fD=data.datasets[0].data,grD=data.datasets[1].data;data.labels.forEach((lbl,i)=>{const xp=x.getPixelForValue(i);if(grD[i]>0){c.fillStyle='#333';c.fillText(Math.round(grD[i]).toLocaleString(),xp,y.getPixelForValue(grD[i])-4);return;}if(gD[i]>0){c.fillStyle='#0F6E56';c.fillText('+'+Math.round(gD[i]).toLocaleString(),xp,y.getPixelForValue(fD[i]+gD[i])-4);}if(rD[i]>0){c.fillStyle='#A32D2D';c.fillText('-'+Math.round(rD[i]).toLocaleString(),xp,y.getPixelForValue(fD[i])-4);}});c.restore();}}]});
 }
 
-/* ── SAMPLE DATA (includes mom field = col 7) ── */
-const SAMPLE_ROWS=[
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"Africa",imCountry:"Ivory Coast",vol1:35.63,vol2:32.18,mom:-3.45,avg2025:54.09,vsAvg:-21.91},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"Africa",imCountry:"Senegal",vol1:35.36,vol2:30.65,mom:-4.71,avg2025:31.26,vsAvg:-0.61},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"Africa",imCountry:"South Africa",vol1:102.92,vol2:34.04,mom:-68.88,avg2025:106.3,vsAvg:-72.26},
-  {exRegion:"Africa",exCountry:"Libya",imRegion:"Africa",imCountry:"Togo",vol1:0,vol2:30.65,mom:30.65,avg2025:0,vsAvg:30.65},
-  {exRegion:"Africa",exCountry:"Algeria",imRegion:"Africa",imCountry:"Egypt",vol1:125,vol2:0,mom:-125,avg2025:0,vsAvg:0},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"Middle East",imCountry:"UAE",vol1:13.67,vol2:3.8,mom:-9.87,avg2025:71.35,vsAvg:-67.55},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"NON-OECD Americas",imCountry:"Brazil",vol1:100.28,vol2:23.03,mom:-77.25,avg2025:76.81,vsAvg:-53.78},
-  {exRegion:"Africa",exCountry:"Libya",imRegion:"NON-OECD Europe",imCountry:"Croatia",vol1:36.01,vol2:50.85,mom:14.84,avg2025:35.98,vsAvg:14.87},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"OECD Americas",imCountry:"Canada",vol1:97.06,vol2:20.32,mom:-76.74,avg2025:210.91,vsAvg:-190.59},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"OECD Americas",imCountry:"United States",vol1:88.5,vol2:0,mom:-88.5,avg2025:189.68,vsAvg:-189.68},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"OECD Asia Oceania",imCountry:"South Korea",vol1:105.27,vol2:65.16,mom:-40.11,avg2025:58.3,vsAvg:6.86},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"OECD Europe",imCountry:"France",vol1:462.57,vol2:91.85,mom:-370.72,avg2025:388.96,vsAvg:-297.11},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"OECD Europe",imCountry:"Italy",vol1:1015.22,vol2:262.3,mom:-752.92,avg2025:864.24,vsAvg:-601.94},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"OECD Europe",imCountry:"Netherlands",vol1:414.22,vol2:171.56,mom:-242.66,avg2025:356.15,vsAvg:-184.59},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"OECD Europe",imCountry:"Spain",vol1:492.09,vol2:71.83,mom:-420.26,avg2025:460.99,vsAvg:-389.16},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"Other Asia",imCountry:"China",vol1:957.96,vol2:436.15,mom:-521.81,avg2025:1023.27,vsAvg:-587.12},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"Other Asia",imCountry:"India",vol1:565.15,vol2:45.06,mom:-520.09,avg2025:335.13,vsAvg:-290.07},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"Other Asia",imCountry:"Indonesia",vol1:190.03,vol2:132.15,mom:-57.88,avg2025:208.52,vsAvg:-76.37},
-  {exRegion:"Africa",exCountry:"Nigeria",imRegion:"Unknown",imCountry:"Unknown",vol1:354.15,vol2:332.97,mom:-21.18,avg2025:0,vsAvg:332.97},
-  {exRegion:"Eurasia",exCountry:"Russia",imRegion:"Eurasia",imCountry:"Azerbaijan",vol1:32.43,vol2:15,mom:-17.43,avg2025:84.26,vsAvg:-69.26},
-  {exRegion:"Eurasia",exCountry:"Russia",imRegion:"NON-OECD Europe",imCountry:"Bulgaria",vol1:73.17,vol2:33.45,mom:-39.72,avg2025:34.85,vsAvg:-1.4},
-  {exRegion:"Eurasia",exCountry:"Russia",imRegion:"OECD Europe",imCountry:"France",vol1:155.61,vol2:58.19,mom:-97.42,avg2025:155.3,vsAvg:-97.11},
-  {exRegion:"Eurasia",exCountry:"Russia",imRegion:"OECD Europe",imCountry:"Italy",vol1:208.57,vol2:162.31,mom:-46.26,avg2025:463.46,vsAvg:-301.15},
-  {exRegion:"Eurasia",exCountry:"Russia",imRegion:"OECD Europe",imCountry:"Netherlands",vol1:281.07,vol2:57.79,mom:-223.28,avg2025:270.04,vsAvg:-212.25},
-  {exRegion:"Eurasia",exCountry:"Russia",imRegion:"OECD Europe",imCountry:"Turkey",vol1:313.92,vol2:23.79,mom:-290.13,avg2025:379.8,vsAvg:-356.01},
-  {exRegion:"Eurasia",exCountry:"Russia",imRegion:"Other Asia",imCountry:"China",vol1:1408.71,vol2:336.72,mom:-1071.99,avg2025:1213.99,vsAvg:-877.27},
-  {exRegion:"Eurasia",exCountry:"Russia",imRegion:"Other Asia",imCountry:"India",vol1:846.09,vol2:162.46,mom:-683.63,avg2025:1700.31,vsAvg:-1537.85},
-  {exRegion:"Eurasia",exCountry:"Russia",imRegion:"Unknown",imCountry:"Unknown",vol1:606.88,vol2:607.98,mom:1.1,avg2025:30.89,vsAvg:577.09},
-  {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"Africa",imCountry:"Egypt",vol1:936.8,vol2:587.13,mom:-349.67,avg2025:782.94,vsAvg:-195.81},
-  {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"OECD Americas",imCountry:"United States",vol1:314.85,vol2:0,mom:-314.85,avg2025:435.47,vsAvg:-435.47},
-  {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"OECD Asia Oceania",imCountry:"Japan",vol1:2369.68,vol2:193.56,mom:-2176.12,avg2025:2097.35,vsAvg:-1903.79},
-  {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"OECD Asia Oceania",imCountry:"South Korea",vol1:1855.98,vol2:344.26,mom:-1511.72,avg2025:1974.53,vsAvg:-1630.27},
-  {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"OECD Europe",imCountry:"Greece",vol1:170.92,vol2:28.96,mom:-141.96,avg2025:144.98,vsAvg:-116.02},
-  {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"OECD Europe",imCountry:"Italy",vol1:70.98,vol2:30.97,mom:-40.01,avg2025:85.16,vsAvg:-54.19},
-  {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"Other Asia",imCountry:"China",vol1:4587.09,vol2:1130.93,mom:-3456.16,avg2025:5322.73,vsAvg:-4191.8},
-  {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"Other Asia",imCountry:"India",vol1:2638.62,vol2:476.99,mom:-2161.63,avg2025:2235.41,vsAvg:-1758.42},
-  {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"Other Asia",imCountry:"Malaysia",vol1:237.08,vol2:228.25,mom:-8.83,avg2025:334.79,vsAvg:-106.54},
-  {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"Other Asia",imCountry:"Thailand",vol1:545.48,vol2:64.52,mom:-480.96,avg2025:533.15,vsAvg:-468.63},
-  {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"Unknown",imCountry:"Unknown",vol1:2707.21,vol2:1810.88,mom:-896.33,avg2025:610.54,vsAvg:1200.34},
-  {exRegion:"NON-OECD Americas",exCountry:"Venezuela",imRegion:"NON-OECD Americas",imCountry:"Panama",vol1:263.22,vol2:120.35,mom:-142.87,avg2025:355.38,vsAvg:-235.03},
-  {exRegion:"NON-OECD Americas",exCountry:"Venezuela",imRegion:"OECD Americas",imCountry:"United States",vol1:1079.1,vol2:250.37,mom:-828.73,avg2025:1027.26,vsAvg:-776.89},
-  {exRegion:"NON-OECD Americas",exCountry:"Venezuela",imRegion:"OECD Europe",imCountry:"Netherlands",vol1:302.87,vol2:135.09,mom:-167.78,avg2025:288.89,vsAvg:-153.8},
-  {exRegion:"NON-OECD Americas",exCountry:"Venezuela",imRegion:"OECD Europe",imCountry:"Spain",vol1:226.2,vol2:64.57,mom:-161.63,avg2025:228.25,vsAvg:-163.68},
-  {exRegion:"NON-OECD Americas",exCountry:"Venezuela",imRegion:"Other Asia",imCountry:"China",vol1:1213.28,vol2:288.69,mom:-924.59,avg2025:1577.58,vsAvg:-1288.89},
-  {exRegion:"NON-OECD Americas",exCountry:"Venezuela",imRegion:"Other Asia",imCountry:"India",vol1:266.85,vol2:202.75,mom:-64.1,avg2025:181.89,vsAvg:20.86},
-  {exRegion:"NON-OECD Americas",exCountry:"Venezuela",imRegion:"Unknown",imCountry:"Unknown",vol1:644.21,vol2:538.23,mom:-105.98,avg2025:54.73,vsAvg:483.5},
-  {exRegion:"OECD Americas",exCountry:"United States",imRegion:"Africa",imCountry:"Nigeria",vol1:127.94,vol2:68.61,mom:-59.33,avg2025:123.49,vsAvg:-54.88},
-  {exRegion:"OECD Americas",exCountry:"United States",imRegion:"OECD Americas",imCountry:"Canada",vol1:293.58,vol2:115.16,mom:-178.42,avg2025:259.06,vsAvg:-143.9},
-  {exRegion:"OECD Americas",exCountry:"United States",imRegion:"OECD Asia Oceania",imCountry:"South Korea",vol1:441.1,vol2:57.77,mom:-383.33,avg2025:509.19,vsAvg:-451.42},
-  {exRegion:"OECD Americas",exCountry:"United States",imRegion:"OECD Europe",imCountry:"Netherlands",vol1:555.37,vol2:417.63,mom:-137.74,avg2025:529.94,vsAvg:-112.31},
-  {exRegion:"OECD Americas",exCountry:"United States",imRegion:"OECD Europe",imCountry:"Spain",vol1:334.94,vol2:105.34,mom:-229.6,avg2025:409.51,vsAvg:-304.17},
-  {exRegion:"OECD Americas",exCountry:"United States",imRegion:"OECD Europe",imCountry:"United Kingdom",vol1:338.52,vol2:74.52,mom:-264,avg2025:288.03,vsAvg:-213.51},
-  {exRegion:"OECD Americas",exCountry:"United States",imRegion:"Other Asia",imCountry:"China",vol1:261.59,vol2:158.79,mom:-102.8,avg2025:319.2,vsAvg:-160.41},
-  {exRegion:"OECD Americas",exCountry:"United States",imRegion:"Other Asia",imCountry:"Taiwan",vol1:301.96,vol2:65.84,mom:-236.12,avg2025:203.42,vsAvg:-137.58},
-  {exRegion:"OECD Americas",exCountry:"United States",imRegion:"Unknown",imCountry:"Unknown",vol1:105.91,vol2:427.62,mom:321.71,avg2025:0,vsAvg:427.62},
-  {exRegion:"OECD Europe",exCountry:"Norway",imRegion:"OECD Europe",imCountry:"Finland",vol1:205.13,vol2:78.28,mom:-126.85,avg2025:185.75,vsAvg:-107.47},
-  {exRegion:"OECD Europe",exCountry:"Norway",imRegion:"OECD Europe",imCountry:"Germany",vol1:159.79,vol2:166.18,mom:6.39,avg2025:205.35,vsAvg:-39.17},
-  {exRegion:"OECD Europe",exCountry:"Norway",imRegion:"OECD Europe",imCountry:"Netherlands",vol1:373.63,vol2:272.31,mom:-101.32,avg2025:477.15,vsAvg:-204.84},
-  {exRegion:"OECD Europe",exCountry:"Norway",imRegion:"OECD Europe",imCountry:"Poland",vol1:279.75,vol2:59.27,mom:-220.48,avg2025:324.51,vsAvg:-265.24},
-  {exRegion:"OECD Europe",exCountry:"Norway",imRegion:"OECD Europe",imCountry:"United Kingdom",vol1:268.22,vol2:45.99,mom:-222.23,avg2025:205.74,vsAvg:-159.75},
-  {exRegion:"OECD Europe",exCountry:"Norway",imRegion:"Unknown",imCountry:"Unknown",vol1:33.92,vol2:151.17,mom:117.25,avg2025:0,vsAvg:151.17},
-  {exRegion:"Other Asia",exCountry:"Malaysia",imRegion:"OECD Asia Oceania",imCountry:"Australia",vol1:85.86,vol2:23.18,mom:-62.68,avg2025:95.61,vsAvg:-72.43},
-  {exRegion:"Other Asia",exCountry:"Malaysia",imRegion:"Other Asia",imCountry:"Thailand",vol1:153.23,vol2:12.99,mom:-140.24,avg2025:110.49,vsAvg:-97.5},
-  {exRegion:"Other Asia",exCountry:"Malaysia",imRegion:"Unknown",imCountry:"Unknown",vol1:27.15,vol2:311.96,mom:284.81,avg2025:1.65,vsAvg:310.31},
-];
-
+/* ── AUTO-FETCH data.xlsx FROM GITHUB, FALL BACK TO SAMPLE DATA ── */
 (function(){
-  document.getElementById('period-lbl').textContent='— Feb vs Mar 2026 (sample data)';
-  initData(SAMPLE_ROWS);
+  const DATA_URL='https://raw.githubusercontent.com/jennythomson-123/crude-flow-dashboard/main/data.xlsx';
+  setStatus('Loading data…','');
+  fetch(DATA_URL)
+    .then(r=>{ if(!r.ok) throw new Error('File not found'); return r.arrayBuffer(); })
+    .then(buf=>{ processRawData(buf,'data.xlsx'); })
+    .catch(()=>{
+      setStatus('No data.xlsx found — upload your Excel file to update','');
+      document.getElementById('period-lbl').textContent='— sample data';
+      const SAMPLE_ROWS=[
+        {exRegion:"Africa",exCountry:"Nigeria",imRegion:"Africa",imCountry:"Ivory Coast",vol1:35.63,vol2:32.18,mom:-3.45,avg2025:54.09,vsAvg:-21.91},
+        {exRegion:"Africa",exCountry:"Nigeria",imRegion:"Africa",imCountry:"Senegal",vol1:35.36,vol2:30.65,mom:-4.71,avg2025:31.26,vsAvg:-0.61},
+        {exRegion:"Africa",exCountry:"Nigeria",imRegion:"Africa",imCountry:"South Africa",vol1:102.92,vol2:34.04,mom:-68.88,avg2025:106.3,vsAvg:-72.26},
+        {exRegion:"Africa",exCountry:"Nigeria",imRegion:"OECD Europe",imCountry:"France",vol1:462.57,vol2:91.85,mom:-370.72,avg2025:388.96,vsAvg:-297.11},
+        {exRegion:"Africa",exCountry:"Nigeria",imRegion:"OECD Europe",imCountry:"Italy",vol1:1015.22,vol2:262.3,mom:-752.92,avg2025:864.24,vsAvg:-601.94},
+        {exRegion:"Africa",exCountry:"Nigeria",imRegion:"Other Asia",imCountry:"China",vol1:957.96,vol2:436.15,mom:-521.81,avg2025:1023.27,vsAvg:-587.12},
+        {exRegion:"Africa",exCountry:"Nigeria",imRegion:"Other Asia",imCountry:"India",vol1:565.15,vol2:45.06,mom:-520.09,avg2025:335.13,vsAvg:-290.07},
+        {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"OECD Asia Oceania",imCountry:"Japan",vol1:2369.68,vol2:193.56,mom:-2176.12,avg2025:2097.35,vsAvg:-1903.79},
+        {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"OECD Asia Oceania",imCountry:"South Korea",vol1:1855.98,vol2:344.26,mom:-1511.72,avg2025:1974.53,vsAvg:-1630.27},
+        {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"Other Asia",imCountry:"China",vol1:4587.09,vol2:1130.93,mom:-3456.16,avg2025:5322.73,vsAvg:-4191.8},
+        {exRegion:"Middle East",exCountry:"Saudi Arabia",imRegion:"Other Asia",imCountry:"India",vol1:2638.62,vol2:476.99,mom:-2161.63,avg2025:2235.41,vsAvg:-1758.42},
+        {exRegion:"Eurasia",exCountry:"Russia",imRegion:"OECD Europe",imCountry:"Italy",vol1:208.57,vol2:162.31,mom:-46.26,avg2025:463.46,vsAvg:-301.15},
+        {exRegion:"Eurasia",exCountry:"Russia",imRegion:"Other Asia",imCountry:"China",vol1:1408.71,vol2:336.72,mom:-1071.99,avg2025:1213.99,vsAvg:-877.27},
+        {exRegion:"Eurasia",exCountry:"Russia",imRegion:"Other Asia",imCountry:"India",vol1:846.09,vol2:162.46,mom:-683.63,avg2025:1700.31,vsAvg:-1537.85},
+        {exRegion:"OECD Americas",exCountry:"United States",imRegion:"OECD Europe",imCountry:"Netherlands",vol1:555.37,vol2:417.63,mom:-137.74,avg2025:529.94,vsAvg:-112.31},
+        {exRegion:"OECD Americas",exCountry:"United States",imRegion:"Other Asia",imCountry:"China",vol1:261.59,vol2:158.79,mom:-102.8,avg2025:319.2,vsAvg:-160.41},
+      ];
+      initData(SAMPLE_ROWS);
+    });
 })();
 </script>
 </body>
