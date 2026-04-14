@@ -612,17 +612,14 @@ function renderBubble(){
   if(exF!=='all') data=data.filter(d=>d.ex===exF);
   if(imF!=='all') data=data.filter(d=>d.im===imF);
 
-  // all current month rows (unfiltered) for stat cards
-  const exF=document.getElementById('b-ex-filter').value;
-const imF=document.getElementById('b-im-filter').value;
-const filteredCur=getRowsForDate(curDk)
-  .filter(r=>exF==='all'||r[S.exGran]===exF)
-  .filter(r=>imF==='all'||r[S.imGran]===imF);
-const filteredPrior=getRowsForDate(dateKey(S.priorDate))
-  .filter(r=>exF==='all'||r[S.exGran]===exF)
-  .filter(r=>imF==='all'||r[S.imGran]===imF);
-buildStatCards('b-stats', filteredCur, filteredPrior);
-  
+  // stat cards filtered to match bubble filters
+  const filteredCur=getRowsForDate(curDk)
+    .filter(r=>exF==='all'||r[S.exGran]===exF)
+    .filter(r=>imF==='all'||r[S.imGran]===imF);
+  const filteredPrior=getRowsForDate(priorDk)
+    .filter(r=>exF==='all'||r[S.exGran]===exF)
+    .filter(r=>imF==='all'||r[S.imGran]===imF);
+  buildStatCards('b-stats', filteredCur, filteredPrior);
 
   const isMom=S.view==='mom';
 
@@ -694,17 +691,17 @@ buildStatCards('b-stats', filteredCur, filteredPrior);
         c.fillText('no change',x.getPixelForValue(x.max*0.72),y.getPixelForValue(x.max*0.78));
         c.restore();
       }},
-   {id:'bubblelabels',afterDatasetsDraw(ch){
-  const{ctx:c,scales:{x,y}}=ch;
-  c.save();c.font='500 9px sans-serif';c.textAlign='left';c.textBaseline='middle';
-  ch.data.datasets.forEach(ds=>{ds.data.forEach(pt=>{
-    if(!pt._d) return;
-    if(pt.x < 1500 && pt.y < 1500) return;
-    const xp=x.getPixelForValue(pt.x),yp=y.getPixelForValue(pt.y),r=pt.r||4;
-    c.fillStyle='rgba(40,40,40,0.72)';c.fillText(pt._d.im,xp+r+3,yp);
-  });});
-  c.restore();
-}}
+      {id:'bubblelabels',afterDatasetsDraw(ch){
+        const{ctx:c,scales:{x,y}}=ch;
+        c.save();c.font='500 9px sans-serif';c.textAlign='left';c.textBaseline='middle';
+        ch.data.datasets.forEach(ds=>{ds.data.forEach(pt=>{
+          if(!pt._d) return;
+          if(pt.x < 1500 && pt.y < 1500) return;
+          const xp=x.getPixelForValue(pt.x),yp=y.getPixelForValue(pt.y),r=pt.r||4;
+          c.fillStyle='rgba(40,40,40,0.72)';c.fillText(pt._d.im,xp+r+3,yp);
+        });});
+        c.restore();
+      }}
     ]
   });
 }
@@ -718,7 +715,7 @@ function renderDiverging(){
   const allCurRows=getRowsForDate(curDk).filter(r=>r[S.exGran]===S.activeExKey);
   const allPriorRows=getRowsForDate(dateKey(S.priorDate)).filter(r=>r[S.exGran]===S.activeExKey);
   buildStatCards('d-stats',allCurRows,allPriorRows);
-  
+
   const isMom=S.view==='mom';
   const agg=aggByIm(curRows,S.imGran);
   const sorted=[...agg].sort((a,b)=>isMom?a.mom-b.mom:a.vsAvg-b.vsAvg);
@@ -787,9 +784,9 @@ function renderWaterfall(){
   const nPos=steps.filter(s=>s.val>0).length,nNeg=steps.filter(s=>s.val<0).length;
 
   buildStatCards('w-stats',
-  getRowsForDate(curDk).filter(r=>r[S.imGran]===S.activeImKey),
-  getRowsForDate(priorDk).filter(r=>r[S.imGran]===S.activeImKey)
-);
+    getRowsForDate(curDk).filter(r=>r[S.imGran]===S.activeImKey),
+    getRowsForDate(priorDk).filter(r=>r[S.imGran]===S.activeImKey)
+  );
   document.getElementById('w-note').textContent=
     `Import group: ${S.imGran}=${S.activeImKey}. Base=${baseLabel}. Steps=each ${S.exGran} ${isMom?'m-o-m':'vs Annual avg'} contribution. Final=${dateLabel(S.curDate)}.`;
 
