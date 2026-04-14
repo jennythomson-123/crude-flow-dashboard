@@ -685,16 +685,17 @@ function renderBubble(){
         c.fillText('no change',x.getPixelForValue(x.max*0.72),y.getPixelForValue(x.max*0.78));
         c.restore();
       }},
-      {id:'bubblelabels',afterDatasetsDraw(ch){
-        const{ctx:c,scales:{x,y}}=ch;
-        c.save();c.font='500 9px sans-serif';c.textAlign='left';c.textBaseline='middle';
-        ch.data.datasets.forEach(ds=>{ds.data.forEach(pt=>{
-          if(!pt._d)return;
-          const xp=x.getPixelForValue(pt.x),yp=y.getPixelForValue(pt.y),r=pt.r||4;
-          c.fillStyle='rgba(40,40,40,0.72)';c.fillText(pt._d.im,xp+r+3,yp);
-        });});
-        c.restore();
-      }}
+   {id:'bubblelabels',afterDatasetsDraw(ch){
+  const{ctx:c,scales:{x,y}}=ch;
+  c.save();c.font='500 9px sans-serif';c.textAlign='left';c.textBaseline='middle';
+  ch.data.datasets.forEach(ds=>{ds.data.forEach(pt=>{
+    if(!pt._d) return;
+    if(pt.x < 1500 && pt.y < 1500) return;
+    const xp=x.getPixelForValue(pt.x),yp=y.getPixelForValue(pt.y),r=pt.r||4;
+    c.fillStyle='rgba(40,40,40,0.72)';c.fillText(pt._d.im,xp+r+3,yp);
+  });});
+  c.restore();
+}}
     ]
   });
 }
