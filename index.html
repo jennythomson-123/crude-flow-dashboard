@@ -613,7 +613,16 @@ function renderBubble(){
   if(imF!=='all') data=data.filter(d=>d.im===imF);
 
   // all current month rows (unfiltered) for stat cards
-  buildStatCards('b-stats', getRowsForDate(curDk), getRowsForDate(priorDk));
+  const exF=document.getElementById('b-ex-filter').value;
+const imF=document.getElementById('b-im-filter').value;
+const filteredCur=getRowsForDate(curDk)
+  .filter(r=>exF==='all'||r[S.exGran]===exF)
+  .filter(r=>imF==='all'||r[S.imGran]===imF);
+const filteredPrior=getRowsForDate(dateKey(S.priorDate))
+  .filter(r=>exF==='all'||r[S.exGran]===exF)
+  .filter(r=>imF==='all'||r[S.imGran]===imF);
+buildStatCards('b-stats', filteredCur, filteredPrior);
+  
 
   const isMom=S.view==='mom';
 
@@ -706,10 +715,10 @@ function renderBubble(){
 function renderDiverging(){
   const curDk=dateKey(S.curDate);
   const curRows=getRowsForDate(curDk).filter(r=>r[S.exGran]===S.activeExKey);
-  const allCurRows=getRowsForDate(curDk);
-  const allPriorRows=getRowsForDate(dateKey(S.priorDate));
+  const allCurRows=getRowsForDate(curDk).filter(r=>r[S.exGran]===S.activeExKey);
+  const allPriorRows=getRowsForDate(dateKey(S.priorDate)).filter(r=>r[S.exGran]===S.activeExKey);
   buildStatCards('d-stats',allCurRows,allPriorRows);
-
+  
   const isMom=S.view==='mom';
   const agg=aggByIm(curRows,S.imGran);
   const sorted=[...agg].sort((a,b)=>isMom?a.mom-b.mom:a.vsAvg-b.vsAvg);
@@ -777,7 +786,10 @@ function renderWaterfall(){
   const totalChange=final-base;
   const nPos=steps.filter(s=>s.val>0).length,nNeg=steps.filter(s=>s.val<0).length;
 
-  buildStatCards('w-stats',getRowsForDate(curDk),getRowsForDate(priorDk));
+  buildStatCards('w-stats',
+  getRowsForDate(curDk).filter(r=>r[S.imGran]===S.activeImKey),
+  getRowsForDate(priorDk).filter(r=>r[S.imGran]===S.activeImKey)
+);
   document.getElementById('w-note').textContent=
     `Import group: ${S.imGran}=${S.activeImKey}. Base=${baseLabel}. Steps=each ${S.exGran} ${isMom?'m-o-m':'vs Annual avg'} contribution. Final=${dateLabel(S.curDate)}.`;
 
