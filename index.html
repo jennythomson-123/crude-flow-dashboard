@@ -6,6 +6,7 @@
 <title>Crude flow dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; color: #1a1a1a; min-height: 100vh; font-size: 14px; }
@@ -120,6 +121,7 @@ select { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 0.5px so
   <button class="tab active" onclick="switchTab('bubble',this)">Bubble scatter</button>
   <button class="tab" onclick="switchTab('diverging',this)">Diverging bars</button>
   <button class="tab" onclick="switchTab('waterfall',this)">Waterfall</button>
+  <button class="tab" onclick="switchTab('sankey',this)">Sankey — flow map</button>
 </div>
 
 <!-- BUBBLE PANEL -->
@@ -174,10 +176,291 @@ select { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 0.5px so
   <p class="note" id="w-note"></p>
 </div>
 
+<!-- SANKEY PANEL -->
+<div class="panel" id="panel-sankey">
+  <div class="col-info" id="s-col-info"></div>
+  <div class="panel-controls" style="margin-bottom:14px;gap:16px;">
+    <div class="ctrl-group">
+      <span class="lbl" style="font-size:12px;color:#666;">Export side:</span>
+      <div class="gran-toggle">
+        <button class="gtab active" id="s-ex-region"  onclick="setSankeyEx('EX_REGION')">IEA Region</button>
+        <button class="gtab"        id="s-ex-tregion" onclick="setSankeyEx('EX_T_REGION')">Trade Region</button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <span class="lbl" style="font-size:12px;color:#666;">Import side:</span>
+      <div class="gran-toggle">
+        <button class="gtab active" id="s-im-region"  onclick="setSankeyIm('IM_REGION')">IEA Region</button>
+        <button class="gtab"        id="s-im-tregion" onclick="setSankeyIm('IM_T_REGION')">Trade Region</button>
+      </div>
+    </div>
+    <div class="ctrl-group" style="margin-left:auto;">
+      <span class="lbl" style="font-size:12px;color:#666;">Min flow (kb/d):</span>
+      <input type="range" id="s-threshold" min="0" max="5000" step="100" value="1500" style="width:120px;">
+      <span id="s-threshold-lbl" style="font-size:12px;font-weight:500;color:#1a1a1a;min-width:60px;">1,500</span>
+    </div>
+  </div>
+  <div class="stat-row" id="s-stats"></div>
+  <div id="sankey-wrap" style="width:100%;overflow-x:auto;"></div>
+  <p class="note" id="s-note"></p>
+</div>
+
 <script>
 /* ═══════════════════════════════════════
-   COLORS
+   SANKEY STATE
 ═══════════════════════════════════════ */
+const SK={
+  exField:'EX_REGION',
+  imField:'IM_REGION',
+  threshold:1500,
+};
+
+document.getElementById('s-threshold').addEventListener('input',function(){
+  SK.threshold=parseInt(this.value)||0;
+  document.getElementById('s-threshold-lbl').textContent=SK.threshold.toLocaleString();
+  renderSankey();
+});
+
+function setSankeyEx(f){
+  SK.exField=f;
+  document.getElementById('s-ex-region').classList.toggle('active', f==='EX_REGION');
+  document.getElementById('s-ex-tregion').classList.toggle('active', f==='EX_T_REGION');
+  renderSankey();
+}
+function setSankeyIm(f){
+  SK.imField=f;
+  document.getElementById('s-im-region').classList.toggle('active', f==='IM_REGION');
+  document.getElementById('s-im-tregion').classList.toggle('active', f==='IM_T_REGION');
+  renderSankey();
+}
+
+/* ═══════════════════════════════════════
+   SANKEY RENDER (pure D3, no plugin)
+═══════════════════════════════════════ */
+function renderSankey(){
+  if(!S.rows.length) return;
+
+  const wrap=document.getElementById('sankey-wrap');
+  wrap.innerHTML='';
+
+  const curDk=dateKey(S.curDate);
+  const rows=getRowsForDate(curDk);
+
+  /* aggregate flows */
+  const flowMap={};
+  rows.forEach(r=>{
+    const ex=r[SK.exField]||'Unknown';
+    const im=r[SK.imField]||'Unknown';
+    const k=ex+'|||'+im;
+    if(!flowMap[k]) flowMap[k]={ex,im,value:0};
+    flowMap[k].value+=r.value;
+  });
+
+  /* filter by threshold */
+  const flows=Object.values(flowMap).filter(f=>f.value>=SK.threshold);
+
+  if(flows.length===0){
+    wrap.innerHTML=`<p style="color:#aaa;font-size:13px;padding:20px 0;">No flows above ${SK.threshold.toLocaleString()} kb/d threshold. Try lowering the slider.</p>`;
+    return;
+  }
+
+  /* stat cards */
+  const totalFlow=flows.reduce((s,f)=>s+f.value,0);
+  const allTotal=rows.reduce((s,r)=>s+r.value,0);
+  document.getElementById('s-stats').innerHTML=`
+    <div class="stat-card"><div class="lbl">${dateLabel(S.curDate)} total (all flows)</div><div class="val">${Math.round(allTotal).toLocaleString()} kb/d</div></div>
+    <div class="stat-card"><div class="lbl">Shown (above threshold)</div><div class="val">${Math.round(totalFlow).toLocaleString()} kb/d</div></div>
+    <div class="stat-card"><div class="lbl">Coverage</div><div class="val">${allTotal>0?Math.round(totalFlow/allTotal*100)+'%':'—'}</div></div>
+    <div class="stat-card"><div class="lbl">Flow corridors shown</div><div class="val">${flows.length}</div></div>`;
+
+  document.getElementById('s-note').textContent=
+    `Flows = VALUE_KBD for ${dateLabel(S.curDate)}. Only corridors ≥ ${SK.threshold.toLocaleString()} kb/d shown. Coloured by export region.`;
+
+  /* unique nodes */
+  const exNodes=[...new Set(flows.map(f=>f.ex))].sort();
+  const imNodes=[...new Set(flows.map(f=>f.im))].sort();
+
+  /* layout constants */
+  const W=Math.max(wrap.clientWidth||900, 700);
+  const nodeW=18;
+  const nodePad=10;
+  const labelPadEx=140;  // space for left labels
+  const labelPadIm=140;  // space for right labels
+  const innerW=W-labelPadEx-labelPadIm-nodeW*2;
+  const exX=labelPadEx;
+  const imX=labelPadEx+nodeW+innerW+nodeW;  // right column x
+  const minH=Math.max(exNodes.length, imNodes.length)*28+80;
+  const H=Math.max(500, minH);
+
+  /* compute node heights proportional to total flow */
+  const exTotals={}, imTotals={};
+  flows.forEach(f=>{
+    exTotals[f.ex]=(exTotals[f.ex]||0)+f.value;
+    imTotals[f.im]=(imTotals[f.im]||0)+f.value;
+  });
+
+  const totalVal=Math.max(...Object.values(exTotals));
+  const availH=H-80;  // usable vertical space
+
+  /* scale: map total flow to pixel height */
+  const scale=v=>(v/totalVal)*availH*0.85;
+
+  /* position ex nodes */
+  const exNodePos={};
+  let yCur=40;
+  exNodes.forEach(n=>{
+    const h=Math.max(8,scale(exTotals[n]||0));
+    exNodePos[n]={y:yCur, h};
+    yCur+=h+nodePad;
+  });
+
+  /* position im nodes */
+  const imNodePos={};
+  yCur=40;
+  imNodes.forEach(n=>{
+    const h=Math.max(8,scale(imTotals[n]||0));
+    imNodePos[n]={y:yCur, h};
+    yCur+=h+nodePad;
+  });
+
+  /* re-scale total height to fit all nodes */
+  const totalExH=yCur;
+  const totalH=Math.max(H, totalExH+40);
+
+  /* sort flows: within each ex node, sort by im value desc */
+  flows.sort((a,b)=>b.value-a.value);
+
+  /* track offsets within each node for stacking ribbons */
+  const exOffset={}, imOffset={};
+  exNodes.forEach(n=>exOffset[n]=0);
+  imNodes.forEach(n=>imOffset[n]=0);
+
+  /* build SVG */
+  const svg=d3.select(wrap).append('svg')
+    .attr('width','100%')
+    .attr('viewBox',`0 0 ${W} ${totalH}`)
+    .attr('preserveAspectRatio','xMidYMid meet')
+    .style('font-family','-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif');
+
+  /* draw ribbons first (behind nodes) */
+  const ribbonG=svg.append('g').attr('class','ribbons');
+
+  flows.forEach(f=>{
+    const exP=exNodePos[f.ex];
+    const imP=imNodePos[f.im];
+    if(!exP||!imP) return;
+
+    const flowH=Math.max(1,scale(f.value));
+    const exY0=exP.y+exOffset[f.ex];
+    const imY0=imP.y+imOffset[f.im];
+    const x0=exX+nodeW;
+    const x1=imX;
+
+    /* bezier control points */
+    const cx=labelPadEx+nodeW+(innerW/2);
+
+    const path=`
+      M ${x0} ${exY0}
+      C ${cx} ${exY0}, ${cx} ${imY0}, ${x1} ${imY0}
+      L ${x1} ${imY0+flowH}
+      C ${cx} ${imY0+flowH}, ${cx} ${exY0+flowH}, ${x0} ${exY0+flowH}
+      Z
+    `;
+
+    const col=rColor(f.ex);
+
+    ribbonG.append('path')
+      .attr('d',path)
+      .attr('fill',col)
+      .attr('fill-opacity',0.35)
+      .attr('stroke',col)
+      .attr('stroke-opacity',0.5)
+      .attr('stroke-width',0.5)
+      .on('mouseover',function(event){
+        d3.select(this).attr('fill-opacity',0.65).attr('stroke-opacity',0.9);
+        /* tooltip */
+        const tip=document.getElementById('s-tooltip');
+        tip.style.display='block';
+        tip.innerHTML=`<div style="font-weight:500;margin-bottom:4px;">${f.ex} → ${f.im}</div><div style="color:#888;">${Math.round(f.value).toLocaleString()} kb/d</div>`;
+        tip.style.left=(event.offsetX+16)+'px';
+        tip.style.top=(event.offsetY-10)+'px';
+      })
+      .on('mouseout',function(){
+        d3.select(this).attr('fill-opacity',0.35).attr('stroke-opacity',0.5);
+        document.getElementById('s-tooltip').style.display='none';
+      });
+
+    exOffset[f.ex]+=flowH;
+    imOffset[f.im]+=flowH;
+  });
+
+  /* draw ex nodes */
+  exNodes.forEach(n=>{
+    const p=exNodePos[n];
+    const col=rColor(n);
+    svg.append('rect')
+      .attr('x',exX).attr('y',p.y)
+      .attr('width',nodeW).attr('height',p.h)
+      .attr('fill',col).attr('rx',3);
+    /* label left of node */
+    svg.append('text')
+      .attr('x',exX-8).attr('y',p.y+p.h/2)
+      .attr('text-anchor','end').attr('dominant-baseline','middle')
+      .attr('font-size',11).attr('fill','#444').attr('font-weight','500')
+      .text(n);
+    /* value below label */
+    svg.append('text')
+      .attr('x',exX-8).attr('y',p.y+p.h/2+13)
+      .attr('text-anchor','end').attr('dominant-baseline','middle')
+      .attr('font-size',10).attr('fill','#aaa')
+      .text(Math.round(exTotals[n]).toLocaleString()+' kb/d');
+  });
+
+  /* draw im nodes */
+  imNodes.forEach(n=>{
+    const p=imNodePos[n];
+    const col=rColor(n);
+    svg.append('rect')
+      .attr('x',imX).attr('y',p.y)
+      .attr('width',nodeW).attr('height',p.h)
+      .attr('fill',col).attr('rx',3);
+    /* label right of node */
+    svg.append('text')
+      .attr('x',imX+nodeW+8).attr('y',p.y+p.h/2)
+      .attr('text-anchor','start').attr('dominant-baseline','middle')
+      .attr('font-size',11).attr('fill','#444').attr('font-weight','500')
+      .text(n);
+    svg.append('text')
+      .attr('x',imX+nodeW+8).attr('y',p.y+p.h/2+13)
+      .attr('text-anchor','start').attr('dominant-baseline','middle')
+      .attr('font-size',10).attr('fill','#aaa')
+      .text(Math.round(imTotals[n]).toLocaleString()+' kb/d');
+  });
+
+  /* column headers */
+  svg.append('text').attr('x',exX+nodeW/2).attr('y',20)
+    .attr('text-anchor','middle').attr('font-size',12).attr('font-weight','500').attr('fill','#666')
+    .text(SK.exField==='EX_REGION'?'IEA Export Region':'Export Trade Region');
+  svg.append('text').attr('x',imX+nodeW/2).attr('y',20)
+    .attr('text-anchor','middle').attr('font-size',12).attr('font-weight','500').attr('fill','#666')
+    .text(SK.imField==='IM_REGION'?'IEA Import Region':'Import Trade Region');
+}
+
+/* tooltip element for sankey */
+(function(){
+  const tip=document.createElement('div');
+  tip.id='s-tooltip';
+  tip.style.cssText='display:none;position:absolute;background:#fff;border:0.5px solid rgba(0,0,0,0.15);border-radius:8px;padding:9px 13px;font-size:12px;pointer-events:none;z-index:10;max-width:220px;box-shadow:0 2px 8px rgba(0,0,0,0.07);';
+  document.getElementById('sankey-wrap').parentNode.insertBefore(tip,document.getElementById('sankey-wrap'));
+})();
+
+/* hook sankey into renderAll */
+const _origRenderAll=renderAll;
+window.renderAll=function(){
+  _origRenderAll();
+  renderSankey();
+};
+</script>
 const REGION_COLORS={
   "Africa":"#02889E","Eurasia":"#644875","Middle East":"#FFBD02",
   "NON-OECD Americas":"#01A93E","OECD Americas":"#81CFE1",
@@ -347,7 +630,7 @@ function processRawData(buf,filename){
 
   // show col info
   const info=`<strong>Loaded:</strong> ${filename} — <span class="col-pill">${parsed.length} rows</span> <span class="col-pill">${sortedDates.length} months</span> <span class="col-pill">${dateLabel(sortedDates[0])} → ${dateLabel(sortedDates[sortedDates.length-1])}</span>`;
-  ['b-col-info','d-col-info','w-col-info'].forEach(id=>{document.getElementById(id).innerHTML=info;document.getElementById(id).style.display='block';});
+  ['b-col-info','d-col-info','w-col-info','s-col-info'].forEach(id=>{document.getElementById(id).innerHTML=info;document.getElementById(id).style.display='block';});
 
   setStatus(`Loaded: ${filename} — ${parsed.length} rows`,'ok');
   buildMonthPicker();
@@ -847,6 +1130,7 @@ function switchTab(name,el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   el.classList.add('active');document.getElementById('panel-'+name).classList.add('active');
+  if(name==='sankey') renderSankey();
 }
 
 /* ═══════════════════════════════════════
