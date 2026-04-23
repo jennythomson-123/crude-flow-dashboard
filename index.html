@@ -47,7 +47,7 @@ select { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 0.5px so
 .legend-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .legend-row span { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #666; }
 .sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
-.note { font-size: 11px; color: #bbb; margin-top: 8px; border-top: 0.5px solid rgba(0,0,0,0.07); padding-top: 8px; }
+.note { font-size: 11px; color: #666; margin-top: 8px; border-top: 0.5px solid rgba(0,0,0,0.07); padding-top: 8px; }
 .col-info { font-size: 11px; color: #666; background: #fff; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 7px; padding: 8px 14px; margin-bottom: 12px; display: none; }
 .col-info strong { color: #1a1a1a; }
 .col-pill { display: inline-block; background: #f0efe8; border-radius: 20px; padding: 1px 8px; font-size: 10px; color: #555; margin: 0 2px; }
@@ -88,8 +88,8 @@ select { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 0.5px so
   <div class="ctrl-group">
     <label>Export group:</label>
     <select id="sel-ex-gran">
-      <option value="EX_COUNTRY">EX Country</option>
-      <option value="EX_REGION" selected>EX Region</option>
+      <option value="EX_COUNTRY" selected>EX Country</option>
+      <option value="EX_REGION">EX Region</option>
       <option value="EX_Def_Region">EX Def Region</option>
       <option value="EX_T_REGION">EX Trade Region</option>
     </select>
@@ -127,12 +127,18 @@ select { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 0.5px so
     <canvas id="bubbleChart" role="img" aria-label="Bubble scatter of crude flow corridors."></canvas>
   </div>
   <div id="b-tooltip"></div>
+  <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:11px;color:#555;">
+    <span>▲ <strong>Above diagonal</strong> = trade flow increasing (current month &gt; prior)</span>
+    <span>▼ <strong>Below diagonal</strong> = trade flow decreasing (current month &lt; prior)</span>
+    <span style="color:#888;">Bubble size = magnitude of change</span>
+  </div>
   <p class="note" id="b-note"></p>
 </div>
 
 <!-- DIVERGING -->
 <div class="panel" id="panel-diverging">
   <div class="col-info" id="d-col-info"></div>
+  <div style="font-size:11px;color:#666;font-weight:500;margin-bottom:6px;" id="d-ex-tabs-label">Select exporting region:</div>
   <div class="rtabs" id="d-ex-tabs"></div>
   <div class="stat-row" id="d-stats"></div>
   <div class="chart-wrap" id="d-chart-wrap" style="height:400px;">
@@ -174,11 +180,19 @@ select { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 0.5px so
       </div>
     </div>
     <div class="ctrl-group">
+      <span class="lbl" style="font-size:12px;color:#666;">Filter export country:</span>
+      <select id="s-ex-country-filter"><option value="all">All countries</option></select>
+    </div>
+    <div class="ctrl-group">
       <span class="lbl" style="font-size:12px;color:#666;">Import side:</span>
       <div class="gran-toggle">
         <button class="gtab active" id="s-im-region"  onclick="setSankeyIm('IM_REGION')">IEA Region</button>
         <button class="gtab"        id="s-im-tregion" onclick="setSankeyIm('IM_T_REGION')">Trade Region</button>
       </div>
+    </div>
+    <div class="ctrl-group">
+      <span class="lbl" style="font-size:12px;color:#666;">Filter import country:</span>
+      <select id="s-im-country-filter"><option value="all">All countries</option></select>
     </div>
     <div class="ctrl-group">
       <span class="lbl" style="font-size:12px;color:#666;">Min flow (kb/d):</span>
@@ -212,7 +226,7 @@ const fmtN=v=>Math.round(v).toLocaleString()+' kb/d';
 /* ── STATE ── */
 const S={
   rows:[],dates:[],curDate:null,priorDate:null,
-  view:'mom',exGran:'EX_REGION',imGran:'IM_REGION',
+  view:'mom',exGran:'EX_COUNTRY',imGran:'IM_REGION',
   activeExKey:null,activeImKey:null
 };
 const SK={exField:'EX_REGION',imField:'IM_REGION',threshold:1500};
@@ -275,11 +289,16 @@ function processRawData(buf,filename){
   const dm={};parsed.forEach(d=>{if(!dm[d.dateKey])dm[d.dateKey]=d.date;});
   const sd=Object.values(dm).sort((a,b)=>a-b);
   S.rows=parsed;S.dates=sd;
-  S.curDate=sd[sd.length-1];S.priorDate=priorMonth(S.curDate);
+  // default = today minus 1 month, or latest available if not found
+  const todayMinus1=priorMonth(new Date());
+  const todayMinus1Key=dateKey(todayMinus1);
+  const matchedDate=sd.find(d=>dateKey(d)===todayMinus1Key);
+  S.curDate=matchedDate||sd[sd.length-1];
+  S.priorDate=priorMonth(S.curDate);
   const info=`<strong>Loaded:</strong> ${filename} — <span class="col-pill">${parsed.length} rows</span> <span class="col-pill">${sd.length} months</span> <span class="col-pill">${dateLabel(sd[0])} → ${dateLabel(sd[sd.length-1])}</span>`;
   ['b-col-info','d-col-info','w-col-info','s-col-info'].forEach(id=>{document.getElementById(id).innerHTML=info;document.getElementById(id).style.display='block';});
   setStatus(`Loaded: ${filename} — ${parsed.length} rows`,'ok');
-  buildMonthPicker();buildFilterDropdowns();buildExTabs();buildWfTabs();buildLegends();
+  buildMonthPicker();buildFilterDropdowns();buildExTabs();buildWfTabs();buildLegends();buildSankeyCountryFilters();
   renderAll();
 }
 
@@ -451,13 +470,15 @@ function renderDiverging(){
   const labels=sorted.map(d=>d.im),barData=sorted.map(d=>Math.round(isMom?d.mom:d.vsAvg));
   const barCol=sorted.map(d=>rColor(d.im)+'cc'),barBord=sorted.map(d=>rColor(d.im));
   buildRegionLegend('d-legend-row',[...new Set(sorted.map(d=>d.im))]);
-  document.getElementById('d-note').textContent=`${S.exGran}=${S.activeExKey}. Bars=${isMom?'m-o-m':'vs Annual avg'}. Coloured by ${S.imGran}.`;
+  const tabLbl=document.getElementById('d-ex-tabs-label');
+  if(tabLbl)tabLbl.textContent=`Select exporting ${S.exGran==='EX_COUNTRY'?'country':S.exGran==='EX_T_REGION'?'trade region':S.exGran==='EX_Def_Region'?'defined region':'region'}:`;
+  document.getElementById('d-note').textContent=`Showing exports from: ${S.activeExKey}. Bars = ${isMom?'m-o-m change (kb/d)':'vs Annual Average (kb/d)'}. Bars coloured by importing ${S.imGran==='IM_COUNTRY'?'country':'region'}.`;
   const h=Math.max(300,sorted.length*36+80);document.getElementById('d-chart-wrap').style.height=h+'px';
   const xMin=Math.min(...barData,0)*1.12,xMax=Math.max(...barData,0)*1.12+20;
   const datasets=[{label:isMom?'m-o-m':'vs avg',data:barData,backgroundColor:barCol,borderColor:barBord,borderWidth:1,borderRadius:3}];
   const ctx=document.getElementById('divChart').getContext('2d');
   if(dChart){dChart.data.labels=labels;dChart.data.datasets=datasets;dChart.options.scales.x.min=xMin;dChart.options.scales.x.max=xMax;dChart.update();return;}
-  dChart=new Chart(ctx,{type:'bar',data:{labels,datasets},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,layout:{padding:{right:72}},plugins:{legend:{display:false},tooltip:{callbacks:{title:i=>i[0].label,label:i=>' '+(isMom?'m-o-m':'vs avg')+': '+(i.raw>0?'+':'')+i.raw.toLocaleString()+' kb/d'}}},scales:{x:{min:xMin,max:xMax,grid:{color:'rgba(136,135,128,0.12)'},ticks:{color:'#888',font:{size:10},callback:v=>v.toLocaleString()},border:{display:false}},y:{grid:{display:false},ticks:{color:'#555',font:{size:11},autoSkip:false},border:{display:false}}}},plugins:[{id:'zero',afterDraw(ch){const{ctx:c,scales:{x,y}}=ch;const xz=x.getPixelForValue(0);c.save();c.strokeStyle='rgba(136,135,128,0.45)';c.lineWidth=1;c.beginPath();c.moveTo(xz,y.top);c.lineTo(xz,y.bottom);c.stroke();c.restore();}},{id:'lbl',afterDatasetsDraw(ch){const{ctx:c,scales:{x,y},data}=ch;const vals=data.datasets[0].data;c.save();c.font='500 10px sans-serif';c.textBaseline='middle';vals.forEach((v,i)=>{const yp=y.getPixelForValue(i),xp=x.getPixelForValue(v);c.fillStyle=v<0?'#4a1a1a':'#1a3a1a';c.textAlign=v<0?'right':'left';c.fillText((v>0?'+':'')+v.toLocaleString(),xp+(v<0?-4:4),yp);});c.restore();}}]});
+  dChart=new Chart(ctx,{type:'bar',data:{labels,datasets},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,layout:{padding:{right:72}},plugins:{legend:{display:false},tooltip:{callbacks:{title:i=>i[0].label,label:i=>' '+(isMom?'m-o-m':'vs avg')+': '+(i.raw>0?'+':'')+i.raw.toLocaleString()+' kb/d'}}},scales:{x:{min:xMin,max:xMax,grid:{color:'rgba(136,135,128,0.12)'},ticks:{color:'#888',font:{size:10},callback:v=>v.toLocaleString()},border:{display:false},title:{display:true,text:isMom?'m-o-m change (kb/d)':'vs Annual avg (kb/d)',color:'#888',font:{size:11}}},y:{grid:{display:false},ticks:{color:'#555',font:{size:11},autoSkip:false},border:{display:false},title:{display:true,text:'Importing '+( S.imGran==='IM_COUNTRY'?'country':'region'),color:'#888',font:{size:11}}}}},plugins:[{id:'zero',afterDraw(ch){const{ctx:c,scales:{x,y}}=ch;const xz=x.getPixelForValue(0);c.save();c.strokeStyle='rgba(136,135,128,0.45)';c.lineWidth=1;c.beginPath();c.moveTo(xz,y.top);c.lineTo(xz,y.bottom);c.stroke();c.restore();}},{id:'lbl',afterDatasetsDraw(ch){const{ctx:c,scales:{x,y},data}=ch;const vals=data.datasets[0].data;c.save();c.font='500 10px sans-serif';c.textBaseline='middle';vals.forEach((v,i)=>{const yp=y.getPixelForValue(i),xp=x.getPixelForValue(v);c.fillStyle=v<0?'#4a1a1a':'#1a3a1a';c.textAlign=v<0?'right':'left';c.fillText((v>0?'+':'')+v.toLocaleString(),xp+(v<0?-4:4),yp);});c.restore();}}]});
 }
 
 /* ── WATERFALL ── */
@@ -466,6 +487,7 @@ function renderWaterfall(){
   const imRows=S.rows.filter(r=>r.dateKey===cdk&&r[S.imGran]===S.activeImKey);
   const imPRows=S.rows.filter(r=>r.dateKey===pdk&&r[S.imGran]===S.activeImKey);
   const base=isMom?imPRows.reduce((s,r)=>s+r.value,0):imRows.reduce((s,r)=>s+r.prevYrAvg,0);
+  // Note: vs-avg base = sum of each row's prevYrAvg (each row's own annual avg contribution)
   const final=imRows.reduce((s,r)=>s+r.value,0);
   const baseLabel=isMom?(dateLabel(S.priorDate)||'Prior month'):'Annual avg';
   const stepMap={};
@@ -479,8 +501,10 @@ function renderWaterfall(){
   labels.push(baseLabel);floats.push(0);grays.push(Math.round(base));posV.push(0);negV.push(0);posBg.push('rgba(0,0,0,0)');negBg.push('rgba(0,0,0,0)');
   let run=Math.round(base);
   steps.forEach(s=>{const col=rColor(s.ex)+'cc';labels.push(s.ex);floats.push(s.val>=0?run:run+s.val);grays.push(0);posV.push(s.val>=0?s.val:0);negV.push(s.val<0?Math.abs(s.val):0);posBg.push(s.val>=0?col:'rgba(0,0,0,0)');negBg.push(s.val<0?col:'rgba(0,0,0,0)');run+=s.val;});
-  labels.push(dateLabel(S.curDate));floats.push(0);grays.push(Math.round(final));posV.push(0);negV.push(0);posBg.push('rgba(0,0,0,0)');negBg.push('rgba(0,0,0,0)');
-  const allY=[Math.round(base),Math.round(final)];let r2=Math.round(base);steps.forEach(s=>{allY.push(r2);r2+=s.val;allY.push(r2);});
+  // Force final bar to actual final value (closes any rounding gap)
+  const finalRounded=Math.round(final);
+  labels.push(dateLabel(S.curDate));floats.push(0);grays.push(finalRounded);posV.push(0);negV.push(0);posBg.push('rgba(0,0,0,0)');negBg.push('rgba(0,0,0,0)');
+  const allY=[Math.round(base),finalRounded];let r2=Math.round(base);steps.forEach(s=>{allY.push(r2);r2+=s.val;allY.push(r2);});
   const yMin=Math.min(...allY)*0.93,yMax=Math.max(...allY)*1.06;
   const datasets=[{label:'_float',data:floats,backgroundColor:'rgba(0,0,0,0)',borderColor:'rgba(0,0,0,0)',stack:'wf'},{label:'Base/Final',data:grays,backgroundColor:'#222',borderColor:'#222',stack:'wf',borderRadius:3},{label:'Growth',data:posV,backgroundColor:posBg,stack:'wf',borderRadius:3},{label:'Decline',data:negV,backgroundColor:negBg,stack:'wf',borderRadius:3}];
   const h=Math.max(400,(steps.length+2)*58+80);document.getElementById('w-chart-wrap').style.height=h+'px';
@@ -508,11 +532,32 @@ document.getElementById('s-threshold').addEventListener('input',function(){
   renderSankey();
 });
 
+function buildSankeyCountryFilters(){
+  const exC=[...new Set(S.rows.map(r=>r.EX_COUNTRY))].filter(Boolean).sort();
+  const imC=[...new Set(S.rows.map(r=>r.IM_COUNTRY))].filter(Boolean).sort();
+  const exSel=document.getElementById('s-ex-country-filter');
+  const imSel=document.getElementById('s-im-country-filter');
+  if(!exSel||!imSel)return;
+  const prevEx=exSel.value,prevIm=imSel.value;
+  exSel.innerHTML='<option value="all">All countries</option>';
+  imSel.innerHTML='<option value="all">All countries</option>';
+  exC.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;exSel.appendChild(o);});
+  imC.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;imSel.appendChild(o);});
+  if(prevEx&&prevEx!=='all')exSel.value=prevEx;
+  if(prevIm&&prevIm!=='all')imSel.value=prevIm;
+  exSel.onchange=renderSankey;
+  imSel.onchange=renderSankey;
+}
+
 function renderSankey(){
   if(!S.rows.length)return;
   const wrap=document.getElementById('sankey-wrap');
   wrap.innerHTML='';
-  const rows=getRowsForDate(dateKey(S.curDate));
+  const exCF=document.getElementById('s-ex-country-filter')?.value||'all';
+  const imCF=document.getElementById('s-im-country-filter')?.value||'all';
+  let rows=getRowsForDate(dateKey(S.curDate));
+  if(exCF!=='all')rows=rows.filter(r=>r.EX_COUNTRY===exCF);
+  if(imCF!=='all')rows=rows.filter(r=>r.IM_COUNTRY===imCF);
   const flowMap={};
   rows.forEach(r=>{
     const ex=r[SK.exField]||'Unknown',im=r[SK.imField]||'Unknown',k=ex+'|||'+im;
@@ -614,7 +659,7 @@ function switchTab(name,el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   el.classList.add('active');document.getElementById('panel-'+name).classList.add('active');
-  if(name==='sankey')renderSankey();
+  if(name==='sankey'){buildSankeyCountryFilters();renderSankey();}
 }
 
 /* ── AUTO-FETCH ── */
